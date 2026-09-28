@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Inkwell — Notes</title>
+<meta name="description" content="A calm, offline-first place to keep your notes.">
+<meta name="theme-color" content="#f7f6f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1113" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Inkwell">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ============================ Library ============================ -->
+<div class="app" id="app">
+
+  <header class="appbar" id="appbar">
+    <button class="iconbtn" id="btnMenu" aria-label="Menu">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h11"/></svg>
+    </button>
+    <h1 class="brand" id="viewTitle">Inkwell</h1>
+    <button class="iconbtn" id="btnSearch" aria-label="Search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+    </button>
+    <button class="iconbtn" id="btnLayout" aria-label="Change layout">
+      <svg viewBox="0 0 24 24" class="ic-grid"><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></svg>
+      <svg viewBox="0 0 24 24" class="ic-list"><rect x="4" y="5" width="16" height="4.6" rx="1.6"/><rect x="4" y="14.4" width="16" height="4.6" rx="1.6"/></svg>
+    </button>
+  </header>
+
+  <div class="searchwrap" id="searchwrap">
+    <div class="searchfield">
+      <svg viewBox="0 0 24 24" class="s-ic"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      <input id="search" type="search" placeholder="Search your notes" autocomplete="off" enterkeyhint="search">
+      <button class="iconbtn tiny" id="btnClearSearch" aria-label="Clear search">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <nav class="chips" id="chips" aria-label="Tag filters"></nav>
+
+  <main class="sheet" id="sheet">
+    <section class="group" id="pinnedGroup" hidden>
+      <h2 class="grouphead">
+        <svg viewBox="0 0 24 24" class="pin-ic"><path d="M9.5 3.5h5l-.7 5.2 3.2 3.3h-4.6L12 20.5l-.4-8.5H7l3.2-3.3z"/></svg>
+        Pinned
+      </h2>
+      <div class="grid" id="pinnedList"></div>
+    </section>
+    <section class="group">
+      <h2 class="grouphead plain" id="otherHead" hidden>Others</h2>
+      <div class="grid" id="notesList"></div>
+    </section>
+
+    <div class="empty" id="empty" hidden>
+      <div class="empty-art" aria-hidden="true">
+        <svg viewBox="0 0 120 120">
+          <rect x="31" y="20" width="58" height="78" rx="9"/>
+          <path d="M44 44h32M44 58h32M44 72h20"/>
+        </svg>
+      </div>
+      <p class="empty-title" id="emptyTitle">Nothing here yet</p>
+      <p class="empty-sub" id="emptySub">Tap the plus button to write your first note.</p>
+    </div>
+  </main>
+
+  <div class="trashbar" id="trashbar" hidden>
+    <span id="trashCount">Trash is empty</span>
+    <button class="textbtn danger" id="btnEmptyTrash">Empty trash</button>
+  </div>
+
+  <button class="fab" id="btnNew" aria-label="New note">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+</div>
+
+<!-- ============================ Drawer ============================ -->
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Navigation">
+  <div class="drawer-head">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><rect x="5.5" y="3" width="13" height="18" rx="2.6"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></svg>
+    </div>
+    <div class="drawer-headtext">
+      <p class="drawer-title">Inkwell</p>
+      <p class="drawer-sub" id="statLine">&nbsp;</p>
+    </div>
+  </div>
+
+  <nav class="drawer-nav" id="drawerNav"></nav>
+
+  <div class="drawer-sect">
+    <p class="drawer-label">Tags</p>
+    <div class="taglist" id="tagList"></div>
+  </div>
+
+  <div class="drawer-sect">
+    <p class="drawer-label">Appearance</p>
+    <div class="segmented" id="themeSeg" role="group" aria-label="Theme">
+      <button type="button" data-theme="light">Light</button>
+      <button type="button" data-theme="dark">Dark</button>
+      <button type="button" data-theme="auto">Auto</button>
+    </div>
+  </div>
+
+  <div class="drawer-sect">
+    <p class="drawer-label">Sort by</p>
+    <div class="segmented" id="sortSeg" role="group" aria-label="Sort order">
+      <button type="button" data-sort="updated">Edited</button>
+      <button type="button" data-sort="created">Created</button>
+      <button type="button" data-sort="title">Title</button>
+    </div>
+  </div>
+
+  <div class="drawer-sect">
+    <p class="drawer-label">Your data</p>
+    <button class="rowbtn" id="btnExport">
+      <svg viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/></svg>
+      <span>Export backup<em>Save every note as one .json file</em></span>
+    </button>
+    <button class="rowbtn" id="btnImport">
+      <svg viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 19h14"/></svg>
+      <span>Import backup<em>Merge notes from a .json file</em></span>
+    </button>
+    <input type="file" id="fileImport" accept="application/json,.json" hidden>
+    <p class="fineprint">Notes are stored on this device only — nothing is uploaded anywhere. Export a backup before you clear your browser data.</p>
+  </div>
+
+  <div class="drawer-sect" id="installSect" hidden>
+    <button class="rowbtn accent" id="btnInstall">
+      <svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.6"/><path d="M10.5 18.6h3"/></svg>
+      <span>Add to home screen<em>Open Inkwell like a native app</em></span>
+    </button>
+  </div>
+
+  <p class="version">Inkwell · version 1.0</p>
+</aside>
+
+<!-- ============================ Editor ============================ -->
+<section class="editor" id="editor" aria-hidden="true">
+  <header class="ed-bar">
+    <button class="iconbtn" id="btnBack" aria-label="Back to notes">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <span class="ed-meta" id="edMeta"></span>
+    <button class="iconbtn" id="btnPin" aria-label="Pin note">
+      <svg viewBox="0 0 24 24"><path d="M9.5 3.5h5l-.7 5.2 3.2 3.3h-4.6L12 20.5l-.4-8.5H7l3.2-3.3z"/></svg>
+    </button>
+    <button class="iconbtn" id="btnPalette" aria-label="Note colour">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="8.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.1" cy="11.5" r="1.15" fill="currentColor" stroke="none"/><circle cx="8.9" cy="11.7" r="1.15" fill="currentColor" stroke="none"/></svg>
+    </button>
+    <button class="iconbtn" id="btnMore" aria-label="More actions">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="5.4" r="1.45" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.45" fill="currentColor" stroke="none"/><circle cx="12" cy="18.6" r="1.45" fill="currentColor" stroke="none"/></svg>
+    </button>
+  </header>
+
+  <div class="ed-scroll" id="edScroll">
+    <textarea class="ed-title" id="edTitle" rows="1" placeholder="Title" enterkeyhint="next"
+              autocomplete="off" spellcheck="true"></textarea>
+    <div class="ed-tags" id="edTags"></div>
+    <div class="ed-body" id="edBody" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Note body" data-placeholder="Start writing…"></div>
+    <p class="ed-footer" id="edFooter"></p>
+  </div>
+
+  <div class="toolbar" id="toolbar">
+    <div class="tools">
+      <button type="button" data-cmd="bold" aria-label="Bold"><svg viewBox="0 0 24 24"><path d="M7.5 4.5h5.2a3.75 3.75 0 010 7.5H7.5zM7.5 12h6a3.75 3.75 0 010 7.5h-6z"/></svg></button>
+      <button type="button" data-cmd="italic" aria-label="Italic"><svg viewBox="0 0 24 24"><path d="M10 4.5h8M6 19.5h8M14.6 4.5l-5.2 15"/></svg></button>
+      <button type="button" data-cmd="strikeThrough" aria-label="Strikethrough"><svg viewBox="0 0 24 24"><path d="M4.5 12h15M8 7.6A3.4 3.4 0 0111.4 5h1.9a3 3 0 012.9 2.4M8 16.4A3.4 3.4 0 0011.4 19h1.9a3 3 0 002.9-2.4"/></svg></button>
+      <span class="tsep"></span>
+      <button type="button" data-cmd="heading" aria-label="Heading"><svg viewBox="0 0 24 24"><path d="M6.5 5v14M17.5 5v14M6.5 12h11"/></svg></button>
+      <button type="button" data-cmd="insertUnorderedList" aria-label="Bullet list"><svg viewBox="0 0 24 24"><path d="M9.5 7h11M9.5 12h11M9.5 17h11"/><circle cx="5" cy="7" r="1.35" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="5" cy="17" r="1.35" fill="currentColor" stroke="none"/></svg></button>
+      <button type="button" data-cmd="insertOrderedList" aria-label="Numbered list"><svg viewBox="0 0 24 24"><path d="M10 7h10.5M10 12h10.5M10 17h10.5M3.6 5.6h1.3v3.2M3.6 11h1.7L3.6 13.4h1.8M3.6 15.8h1.7v1.1H4v1.1h1.4"/></svg></button>
+      <button type="button" data-cmd="checklist" aria-label="Checklist"><svg viewBox="0 0 24 24"><rect x="3.4" y="4.2" width="6" height="6" rx="1.7"/><rect x="3.4" y="13.8" width="6" height="6" rx="1.7"/><path d="M12.6 7.2h8M12.6 16.8h8M4.9 7.2l1.2 1.2 1.9-2.1"/></svg></button>
+      <span class="tsep"></span>
+      <button type="button" data-cmd="quote" aria-label="Quote"><svg viewBox="0 0 24 24"><path d="M4.6 5v14M10 8h10M10 12h10M10 16h6"/></svg></button>
+      <button type="button" data-cmd="code" aria-label="Monospace"><svg viewBox="0 0 24 24"><path d="M9 7.5L4.6 12 9 16.5M15 7.5L19.4 12 15 16.5"/></svg></button>
+      <button type="button" data-cmd="divider" aria-label="Divider"><svg viewBox="0 0 24 24"><path d="M4 12h16"/><path d="M7.5 7.5h9M7.5 16.5h9" opacity=".4"/></svg></button>
+      <span class="tsep"></span>
+      <button type="button" data-cmd="removeFormat" aria-label="Clear formatting"><svg viewBox="0 0 24 24"><path d="M6.5 6h11M12.6 6L9.4 19M5.6 19h7.2M15.6 13.4l4.8 4.8M20.4 13.4l-4.8 4.8"/></svg></button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ Sheets ============================ -->
+<div class="sheetlayer" id="sheetLayer" hidden>
+  <div class="sheetlayer-scrim" id="sheetScrim"></div>
+  <div class="bottomsheet" id="bottomSheet">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+
+<div class="dialog" id="dialog" hidden>
+  <div class="dialog-card">
+    <h3 id="dlgTitle">Are you sure?</h3>
+    <p id="dlgBody"></p>
+    <div class="dialog-actions">
+      <button type="button" class="textbtn" id="dlgCancel">Cancel</button>
+      <button type="button" class="textbtn danger" id="dlgOk">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
