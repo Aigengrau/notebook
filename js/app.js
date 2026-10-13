@@ -40,7 +40,13 @@
 
   const COLORS = ['none', 'red', 'amber', 'green', 'teal', 'blue', 'violet', 'pink', 'sand'];
   const TRASH_DAYS = 30;
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.1.1';
+
+  /* Announce which build is actually running, but only if store.js came from
+     the same one. index.html compares this with the version the service worker
+     is serving: a mismatch means a script survived in a cache it should not
+     have, and the page mends itself rather than running half updated. */
+  if (window.Store && Store.version === APP_VERSION) window.INKWELL_RUNNING = APP_VERSION;
 
   /* photos: phone cameras hand us 12 megapixels, which no note needs */
   const PHOTO_MAX_DIM = 1600;

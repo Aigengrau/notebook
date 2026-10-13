@@ -239,5 +239,96 @@
 
 <script src="js/store.js"></script>
 <script src="js/app.js"></script>
+
+<!-- ============================ Self-repair ============================
+  This page is fetched fresh every launch, but the browser is allowed to
+  answer the two script requests above from a copy it already holds, without
+  consulting the service worker. That can leave a brand-new page driving a
+  months-old app.js — buttons that exist but do nothing. app.js announces the
+  build it belongs to; the worker is asked which build it is serving. If they
+  disagree, come back through a URL nothing can be reused for. Twice at most,
+  so a genuine mismatch can never turn into a reload loop.
+  This has to stand on its own: the script it is checking up on may be far too
+  old to help.                                                              -->
+<script>
+(function () {
+  'use strict';
+  var KEY = 'inkwell.mend';
+  var tries = 0;
+  try { tries = parseInt(sessionStorage.getItem(KEY) || '0', 10) || 0; } catch (e) {}
+
+  function settled() { try { sessionStorage.removeItem(KEY); } catch (e) {} }
+
+  function mend() {
+    if (tries >= 2) return;            // give up quietly — an older app still works
+    try { sessionStorage.setItem(KEY, String(tries + 1)); } catch (e) {}
+
+    var went = false;
+    function go() {
+      if (went) return;
+      went = true;
+      location.replace(location.pathname + '?u=' + Date.now());
+    }
+    setTimeout(go, 3000);              // never hang on a worker that will not answer
+
+    function activate(worker) {
+      if (!worker) return go();
+      try { worker.postMessage({ type: 'skip-waiting' }); } catch (e) {}
+      if (worker.state === 'activated') return go();
+      worker.addEventListener('statechange', function () {
+        if (worker.state === 'activated') go();
+      });
+    }
+
+    if (!navigator.serviceWorker) return go();
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (!reg) return go();
+      var pending = reg.waiting || reg.installing;
+      if (pending) return activate(pending);
+      reg.update()
+        .then(function () { activate(reg.waiting || reg.installing); })
+        .catch(go);
+    }).catch(go);
+  }
+
+  window.addEventListener('load', function () {
+    var running = window.INKWELL_RUNNING || null;
+    var sw = navigator.serviceWorker;
+
+    /* No worker yet — nothing can have been served stale, so trust the page. */
+    if (!sw || !sw.controller) {
+      if (running) settled();
+      else mend();
+      return;
+    }
+
+    var done = false;
+    var channel = new MessageChannel();
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      /* An older worker that does not answer. Only worth mending if the
+         scripts plainly are not the ones they were meant to be. */
+      if (running) settled(); else mend();
+    }, 2500);
+
+    channel.port1.onmessage = function (e) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      var serving = e.data && e.data.version;
+      if (serving && running === serving) settled();
+      else mend();
+    };
+
+    try { sw.controller.postMessage({ type: 'version' }, [channel.port2]); }
+    catch (err) {
+      clearTimeout(timer);
+      done = true;
+      if (!running) mend();
+    }
+  });
+})();
+</script>
 </body>
 </html>

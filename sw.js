@@ -3,7 +3,7 @@
    Bump VERSION whenever the shell files change: the cache name
    is built from it, so every client picks the new files up.
    ============================================================ */
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const CACHE = 'inkwell-' + VERSION;
 
 /* Relative URLs so the app works from any GitHub Pages sub-path. */

@@ -138,9 +138,11 @@ toast if it finds something new.
 > Why a button at all: an installed PWA serves itself out of its own cache, and the
 > browser will happily answer the app's own script and stylesheet requests from a
 > copy it already has without consulting that cache. That is why a freshly deployed
-> change can seem to need a reinstall. Update app forces the whole shell to be
-> re-fetched and then relaunches through a URL the browser has not seen, so the new
-> files are the ones that run.
+> change can seem to need a reinstall — and why `index.html` can arrive new while
+> `js/app.js` is still last month's, leaving buttons on screen that do nothing.
+> Update app forces the whole shell to be re-fetched and then relaunches through a
+> URL the browser has not seen, so the new files are the ones that run. The same
+> relaunch is what the start-up check uses when it notices a mismatched build.
 
 ## Changing it
 
@@ -150,11 +152,17 @@ toast if it finds something new.
   `short_name` in `manifest.webmanifest`.
 - **Icons** — replace the PNGs in `icons/`. They are 192, 512, a 512 maskable
   (keep the artwork inside the middle 80%, Android crops the rest), and a 180 for iOS.
-- **After any change**, bump `VERSION` in [`sw.js`](sw.js) (`1.1.0` → `1.1.1`) and
-  `APP_VERSION` in [`js/app.js`](js/app.js) to match. The cache is named after
-  `VERSION`, so bumping it is what tells every phone to take the new files. Without
-  the bump, a phone that already has the app keeps serving its cached copy until
-  someone taps **Update app**.
+- **After any change**, bump the version in all three files so they agree:
+  `VERSION` in [`sw.js`](sw.js), `APP_VERSION` in [`js/app.js`](js/app.js) and
+  `STORE_VERSION` in [`js/store.js`](js/store.js). The cache is named after
+  `VERSION`, so bumping it is what tells every phone to take the new files.
+
+  The three are compared at start-up, by a short script at the bottom of
+  `index.html`. If a phone ends up running scripts that do not match the build the
+  worker is serving, the page quietly relaunches itself onto the right ones — so a
+  half-updated app repairs itself instead of showing buttons that do nothing. That
+  check is also why the numbers have to match: leave one behind and every launch
+  will try to mend a page that was never broken.
 
 ## Previewing on your computer
 
@@ -168,7 +176,8 @@ work properly — service workers and storage need a real `http://` origin.
 ## What is in here
 
 ```
-index.html              markup and the inline SVG icons
+index.html              markup, the inline SVG icons, and the start-up check
+                        that repairs a half-updated app
 css/style.css           the whole look, light and dark
 js/store.js             IndexedDB storage for notes and photos, export/import
                         (falls back to localStorage)
