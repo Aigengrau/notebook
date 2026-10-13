@@ -250,7 +250,30 @@ html[data-layout="list"] .card .snippet { -webkit-line-clamp: 2; }
   font-size: 11px; font-weight: 500; padding: 1px 7px; border-radius: 999px;
   background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text-2);
 }
+.card .thumbs {
+  position: relative; display: grid; gap: 2px;
+  margin: -13px -14px 4px; background: var(--bg-soft);
+}
+.card .thumbs[data-n="2"] { grid-template-columns: 1fr 1fr; }
+.card .thumbs[data-n="3"] { grid-template-columns: 2fr 1fr 1fr; }
+.card .cthumb {
+  display: block; width: 100%; height: 104px; object-fit: cover;
+  background: var(--bg-soft);
+}
+html[data-layout="list"] .card .cthumb { height: 128px; }
+.card .cthumb.gone { display: none; }
+.card .thumbs[data-n="3"] .cthumb { height: 104px; }
+.card .morepics {
+  position: absolute; right: 7px; bottom: 7px;
+  font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
+  background: rgba(14,12,9,.62); color: #fff;
+}
+.card.haspics h3 { margin-top: 2px; }
 .card .cpin { position: absolute; top: 10px; right: 10px; width: 14px; height: 14px; color: var(--accent); }
+.card.haspics .cpin {
+  background: rgba(14,12,9,.55); color: #fff;
+  border-radius: 50%; padding: 4px; width: 22px; height: 22px; top: 8px; right: 8px;
+}
 .card.haspin h3 { padding-right: 18px; }
 .card mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 
@@ -473,6 +496,18 @@ html.is-dark .tagpill.on { color: #06120e; }
 }
 .ed-body a { color: var(--accent); text-underline-offset: 2px; }
 
+/* photos */
+.ed-body img {
+  display: block; max-width: 100%; height: auto;
+  margin: .7em 0; border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  box-shadow: var(--shadow-1);
+}
+.ed-body img.gone {
+  min-height: 72px; border: 1px dashed color-mix(in srgb, var(--text) 24%, transparent);
+  box-shadow: none;
+}
+
 /* checklists */
 .ed-body ul.todo, .card ul.todo { list-style: none; padding-left: 4px; }
 .ed-body ul.todo li, .card ul.todo li {
@@ -636,6 +671,38 @@ html.is-dark .tagedit .field button { color: #04110d; }
   flex: none; padding: 2px 2px 2px 0;
 }
 html.is-dark .toast button { color: var(--accent-ink); }
+
+/* ---------- photo viewer ---------- */
+.lightbox {
+  position: fixed; inset: 0; z-index: 75;
+  display: grid; place-items: center; padding: 16px;
+  background: rgba(8,7,5,.93);
+  opacity: 0; transition: opacity .22s ease;
+}
+.lightbox.show { opacity: 1; }
+.lightbox img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain; border-radius: var(--r-sm);
+  transform: scale(.96); transition: transform .24s cubic-bezier(.2,.8,.3,1);
+}
+.lightbox.show img { transform: none; }
+.lightbox .lb-close {
+  position: absolute; top: calc(10px + var(--safe-t)); right: 10px;
+  color: #fff; background: rgba(255,255,255,.14); border-radius: 50%;
+}
+
+/* ---------- while the keyboard is opening, closing or being swapped ----------
+   The editor is sized from the visual viewport, so these moments are the most
+   expensive frames the app ever draws. Drop the blur and the transitions for
+   as long as it lasts — on a mid-range phone this is the difference between a
+   smooth slide and a stall. */
+html.vv-busy .toolbar {
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  background: var(--bg);
+  transition: none;
+}
+html.vv-busy .editor { transition: none; }
+html.vv-busy .card { animation: none; }
 
 /* ---------- misc ---------- */
 .muted { color: var(--muted); }

@@ -72,12 +72,30 @@ Chrome offers it.
 | **☰** | Side menu: pinned, trash, tags, theme, sort, backups |
 | **🔍** | Search across every title, body and tag |
 | **Grid icon** | Switch between two columns and a single list |
-| **In a note** | Pin it, give it a colour, add tags, or use **⋮** to copy, share, duplicate or delete |
+| **In a note** | Pin it, give it a colour, add tags, add **photos**, or use **⋮** to copy, share, duplicate or delete |
 
 The toolbar at the bottom of a note scrolls sideways — bold, italic, strikethrough,
-heading, bullets, numbers, **checklists**, quote, monospace, divider, clear formatting.
+heading, bullets, numbers, **checklists**, **photo**, quote, monospace, divider,
+clear formatting.
 
 Tap the square at the left of a checklist line to tick it off.
+
+### Photos
+
+The picture button in a note's toolbar offers **Take a photo** or **Choose from
+gallery**, and you can pick several at once. You can also paste an image straight
+into a note.
+
+Photos are shrunk to fit a note as they go in — a 12-megapixel camera shot lands as
+a few hundred kilobytes rather than four megabytes — so a notebook full of them
+still opens instantly. Tap a photo in a note to **view it full size**, **save it to
+your device**, or **remove** it. Removing one can be undone.
+
+Notes with photos show them on their card in the library.
+
+Photos live on the phone with everything else, and they are included in **Export
+backup**, so one `.json` file really is the whole notebook. That also makes the file
+much bigger — check the size the toast reports after an export.
 
 Deleted notes sit in **Trash** for 30 days, then clear themselves. Nothing is lost
 by accident.
@@ -86,7 +104,8 @@ by accident.
 
 ## Where your notes live — read this bit
 
-Notes are stored **in your phone's browser storage, on that phone only**. Nothing is
+Notes and photos are stored **in your phone's browser storage, on that phone
+only**. Nothing is
 uploaded, there is no account, and nobody else can read them. The flip side is that
 nothing syncs, and the notes are gone if you:
 
@@ -103,6 +122,26 @@ That same export/import pair is how you move your notes to a new phone.
 
 ---
 
+## Updating the app on your phone
+
+**Side menu → Update app.** It fetches the newest version straight away and
+restarts into it. Your notes, photos and settings are untouched — they live in the
+phone's own storage, not in the app files.
+
+You never need to uninstall and reinstall. If the button says *Could not reach the
+network*, nothing has been changed and the app carries on as it was; try again when
+you have a connection.
+
+The app also checks quietly when you open it, and offers a **Update** button in a
+toast if it finds something new.
+
+> Why a button at all: an installed PWA serves itself out of its own cache, and the
+> browser will happily answer the app's own script and stylesheet requests from a
+> copy it already has without consulting that cache. That is why a freshly deployed
+> change can seem to need a reinstall. Update app forces the whole shell to be
+> re-fetched and then relaunches through a URL the browser has not seen, so the new
+> files are the ones that run.
+
 ## Changing it
 
 - **Colours and sizes** — the tokens at the top of [`css/style.css`](css/style.css).
@@ -111,9 +150,11 @@ That same export/import pair is how you move your notes to a new phone.
   `short_name` in `manifest.webmanifest`.
 - **Icons** — replace the PNGs in `icons/`. They are 192, 512, a 512 maskable
   (keep the artwork inside the middle 80%, Android crops the rest), and a 180 for iOS.
-- **After any change**, bump `CACHE` in [`sw.js`](sw.js) (`inkwell-v1` → `inkwell-v2`).
-  Otherwise phones keep serving the old cached copy. With the bump, the app notices
-  the new version and offers a *Reload* button.
+- **After any change**, bump `VERSION` in [`sw.js`](sw.js) (`1.1.0` → `1.1.1`) and
+  `APP_VERSION` in [`js/app.js`](js/app.js) to match. The cache is named after
+  `VERSION`, so bumping it is what tells every phone to take the new files. Without
+  the bump, a phone that already has the app keeps serving its cached copy until
+  someone taps **Update app**.
 
 ## Previewing on your computer
 
@@ -129,9 +170,10 @@ work properly — service workers and storage need a real `http://` origin.
 ```
 index.html              markup and the inline SVG icons
 css/style.css           the whole look, light and dark
-js/store.js             IndexedDB storage, export/import (falls back to localStorage)
+js/store.js             IndexedDB storage for notes and photos, export/import
+                        (falls back to localStorage)
 js/app.js               everything else: rendering, editor, search, settings
-sw.js                   offline cache
+sw.js                   offline cache and the in-place update
 manifest.webmanifest    name, icons, share target, home-screen shortcut
 icons/                  app icons
 .nojekyll               stops GitHub Pages from filtering files

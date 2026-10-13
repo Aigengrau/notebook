@@ -23,11 +23,14 @@
     themeSeg: $('#themeSeg'), sortSeg: $('#sortSeg'),
     btnExport: $('#btnExport'), btnImport: $('#btnImport'), fileImport: $('#fileImport'),
     installSect: $('#installSect'), btnInstall: $('#btnInstall'),
+    btnUpdate: $('#btnUpdate'), updateHint: $('#updateHint'), verLine: $('#verLine'),
     editor: $('#editor'), edBar: $('.ed-bar'), edScroll: $('#edScroll'),
     edTitle: $('#edTitle'), edTags: $('#edTags'), edBody: $('#edBody'), edFooter: $('#edFooter'),
     edMeta: $('#edMeta'),
     btnBack: $('#btnBack'), btnPin: $('#btnPin'), btnPalette: $('#btnPalette'), btnMore: $('#btnMore'),
     toolbar: $('#toolbar'),
+    filePhoto: $('#filePhoto'), fileCamera: $('#fileCamera'),
+    lightbox: $('#lightbox'), lbImg: $('#lbImg'), lbClose: $('#lbClose'),
     sheetLayer: $('#sheetLayer'), sheetScrim: $('#sheetScrim'),
     bottomSheet: $('#bottomSheet'), sheetBody: $('#sheetBody'),
     dialog: $('#dialog'), dlgTitle: $('#dlgTitle'), dlgBody: $('#dlgBody'),
@@ -37,6 +40,13 @@
 
   const COLORS = ['none', 'red', 'amber', 'green', 'teal', 'blue', 'violet', 'pink', 'sand'];
   const TRASH_DAYS = 30;
+  const APP_VERSION = '1.1.0';
+
+  /* photos: phone cameras hand us 12 megapixels, which no note needs */
+  const PHOTO_MAX_DIM = 1600;
+  const PHOTO_QUALITY = 0.85;
+  const PHOTO_MAX_FILE = 40 * 1024 * 1024;
+  const PHOTOS_PER_GO = 12;
 
   const state = {
     view: 'all',        // 'all' | 'pinned' | 'trash' | 'tag'
@@ -60,15 +70,20 @@
   const ALLOWED = {
     P: [], DIV: [], BR: [], H2: [], H3: [], UL: ['class'], OL: [], LI: ['data-done'],
     BLOCKQUOTE: [], PRE: [], CODE: [], B: [], STRONG: [], I: [], EM: [], U: [],
-    S: [], STRIKE: [], DEL: [], HR: [], SPAN: [], A: ['href']
+    S: [], STRIKE: [], DEL: [], HR: [], SPAN: [], A: ['href'], IMG: ['data-img', 'alt']
   };
   /* these go entirely — keeping their text would just leak code into the note */
   const DROP = {
     SCRIPT: 1, STYLE: 1, IFRAME: 1, FRAME: 1, OBJECT: 1, EMBED: 1, APPLET: 1,
     LINK: 1, META: 1, BASE: 1, TITLE: 1, NOSCRIPT: 1, TEMPLATE: 1,
     SVG: 1, MATH: 1, FORM: 1, INPUT: 1, BUTTON: 1, TEXTAREA: 1, SELECT: 1,
-    AUDIO: 1, VIDEO: 1, CANVAS: 1, IMG: 1
+    AUDIO: 1, VIDEO: 1, CANVAS: 1
   };
+  /* `src` is deliberately not in IMG's list: a photo is identified only by
+     the id of its record in our own store, and the blob: URL the editor is
+     showing is re-attached at display time. Anything else — a pasted remote
+     image, a data: URI, javascript: — loses its source and is dropped. */
+  const IMG_ID = /^i[0-9a-z]+-[0-9a-z]+$/;
 
   function sanitizeHTML(html) {
     const doc = document.implementation.createHTMLDocument('');
@@ -103,6 +118,9 @@
           }
           if (name === 'data-done') child.setAttribute('data-done', a.value === '1' ? '1' : '');
         });
+        if (tag === 'IMG' && !IMG_ID.test(child.getAttribute('data-img') || '')) {
+          child.remove(); child = next; continue;   // not one of ours
+        }
         if (tag === 'A') {
           if (!child.getAttribute('href')) { // a link with nothing to point at is just text
             const first = child.firstChild;
@@ -160,6 +178,282 @@
     };
     wrapped.flush = () => { clearTimeout(t); fn(); };
     return wrapped;
+  }
+
+  /* ============================================================
+     photos
+     A note stores only the id of each photo. The bytes live in
+     their own IndexedDB store, and the blob: URL that actually
+     displays them is cached here for the life of the session, so
+     re-rendering the library never churns through object URLs.
+     ============================================================ */
+
+  const picURL = new Map();     // photo id -> blob: URL
+  const picLoading = new Map(); // photo id -> in-flight promise
+
+  function cachePic(id, blob) {
+    if (picURL.has(id)) return picURL.get(id);
+    const url = URL.createObjectURL(blob);
+    picURL.set(id, url);
+    return url;
+  }
+
+  function loadPic(id) {
+    if (picURL.has(id)) return Promise.resolve(picURL.get(id));
+    if (picLoading.has(id)) return picLoading.get(id);
+    const p = Store.getImage(id)
+      .then(rec => (rec && rec.blob ? cachePic(id, rec.blob) : null))
+      .catch(() => null);
+    picLoading.set(id, p);
+    p.then(() => picLoading.delete(id));
+    return p;
+  }
+
+  /* Attach the real source to every <img data-img> under `root`. */
+  function showPics(root) {
+    root.querySelectorAll('img[data-img]').forEach(im => {
+      const id = im.getAttribute('data-img');
+      const ready = picURL.get(id);
+      if (ready) { if (im.getAttribute('src') !== ready) im.src = ready; return; }
+      loadPic(id).then(url => {
+        if (!im.isConnected) return;
+        if (url) im.src = url;
+        else im.classList.add('gone');
+      });
+    });
+  }
+
+  function decodeImage(file) {
+    if (window.createImageBitmap) {
+      return createImageBitmap(file, { imageOrientation: 'from-image' })
+        .catch(() => createImageBitmap(file))      // older option-less signature
+        .catch(() => decodeViaElement(file));
+    }
+    return decodeViaElement(file);
+  }
+
+  /* Last resort for browsers without createImageBitmap. */
+  function decodeViaElement(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const im = new Image();
+      im.onload = () => { URL.revokeObjectURL(url); resolve(im); };
+      im.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That file is not an image Inkwell can read.')); };
+      im.src = url;
+    });
+  }
+
+  /* Shrink to something a note can carry, and keep transparency when the
+     source had it. Returns the blob we are going to store. */
+  async function prepareImage(file) {
+    if (!/^image\//i.test(file.type || '')) throw new Error('That file is not an image.');
+    if (file.size > PHOTO_MAX_FILE) throw new Error('That image is too big to store.');
+
+    const bmp = await decodeImage(file);
+    const srcW = bmp.width || bmp.naturalWidth || 0;
+    const srcH = bmp.height || bmp.naturalHeight || 0;
+    if (!srcW || !srcH) throw new Error('That image could not be read.');
+
+    const scale = Math.min(1, PHOTO_MAX_DIM / Math.max(srcW, srcH));
+
+    /* an animated GIF would come out of the canvas as a single frame */
+    if (/gif$/i.test(file.type) && scale === 1 && file.size <= 2 * 1024 * 1024) {
+      if (bmp.close) bmp.close();
+      return { blob: file, w: srcW, h: srcH };
+    }
+
+    const w = Math.max(1, Math.round(srcW * scale));
+    const h = Math.max(1, Math.round(srcH * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bmp, 0, 0, w, h);
+    if (bmp.close) bmp.close();
+
+    /* JPEG would paint anything transparent black, so keep an alpha format */
+    const keepsAlpha = /png|webp|gif|svg/i.test(file.type);
+    const type = keepsAlpha ? 'image/webp' : 'image/jpeg';
+    const out = await new Promise(res => canvas.toBlob(res, type, PHOTO_QUALITY));
+    canvas.width = canvas.height = 0;
+
+    if (!out) throw new Error('That photo could not be processed.');
+    /* re-encoding small images can make them bigger — then don't bother */
+    if (scale === 1 && out.size >= file.size) return { blob: file, w, h };
+    return { blob: out, w, h };
+  }
+
+  /* ---------- where a photo lands in the note ---------- */
+
+  let savedRange = null;   // the caret, remembered across the file picker
+
+  function rememberCaret() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const r = sel.getRangeAt(0);
+    if (el.edBody.contains(r.startContainer)) savedRange = r.cloneRange();
+  }
+
+  /* The direct child of the body that the caret sits in, so a photo is
+     inserted between blocks instead of inside a paragraph. */
+  function topBlockAt(node) {
+    while (node && node.parentNode && node.parentNode !== el.edBody) node = node.parentNode;
+    return node && node.parentNode === el.edBody ? node : null;
+  }
+
+  function insertBlocks(nodes) {
+    let anchor = null;
+    if (savedRange && el.edBody.contains(savedRange.startContainer)) {
+      anchor = topBlockAt(savedRange.startContainer);
+    } else {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && el.edBody.contains(sel.getRangeAt(0).startContainer)) {
+        anchor = topBlockAt(sel.getRangeAt(0).startContainer);
+      }
+    }
+
+    const tail = document.createElement('p');
+    tail.append(document.createElement('br'));
+    const frag = document.createDocumentFragment();
+    nodes.forEach(n => frag.append(n));
+    frag.append(tail);
+
+    if (anchor) el.edBody.insertBefore(frag, anchor.nextSibling);
+    else el.edBody.append(frag);
+
+    savedRange = null;
+    try {
+      const r = document.createRange();
+      r.setStart(tail, 0);
+      r.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (_) {}
+  }
+
+  async function addPhotos(files) {
+    if (!state.editing || !files.length) return;
+    const forNote = state.editing;      // preparing a photo takes a moment
+    const batch = files.slice(0, PHOTOS_PER_GO);
+    if (files.length > batch.length) toast(PHOTOS_PER_GO + ' photos at a time');
+    else toast(batch.length > 1 ? 'Adding ' + batch.length + ' photos…' : 'Adding photo…');
+
+    const added = [];
+    let failure = '';
+    for (const file of batch) {
+      try {
+        const ready = await prepareImage(file);
+        const rec = await Store.putImage(ready.blob, { w: ready.w, h: ready.h });
+        const im = document.createElement('img');
+        im.setAttribute('data-img', rec.id);
+        im.alt = '';
+        im.src = cachePic(rec.id, ready.blob);
+        added.push(im);
+      } catch (err) {
+        failure = (err && err.message) || 'That photo could not be added.';
+      }
+    }
+
+    if (!added.length) { toast(failure || 'No photos were added'); return; }
+
+    /* the note was closed or swapped while we were working — the photos are
+       already stored, so hand them to the note they were meant for */
+    if (state.editing !== forNote) {
+      const home = Store.get(forNote);
+      if (home) {
+        const html = home.html + added.map(im => im.outerHTML).join('') + '<p><br></p>';
+        Store.update(forNote, { html: sanitizeHTML(html) });
+      }
+      render();
+      toast(added.length > 1 ? added.length + ' photos saved to that note' : 'Photo saved to that note');
+      return;
+    }
+
+    insertBlocks(added);
+    dirty = true;
+    syncPlaceholder();
+    saveNow();                      // a photo is too much work to risk losing
+    render();
+    toast(failure ? 'Added ' + added.length + ' of ' + batch.length + ' — ' + failure
+                  : (added.length > 1 ? added.length + ' photos added' : 'Photo added'));
+  }
+
+  function photoSheet() {
+    rememberCaret();
+    openSheet(parent => {
+      sheetTitle(parent, 'Add a photo');
+      sheetRow(parent, { icon: ICONS.camera, label: 'Take a photo', onTap: () => el.fileCamera.click() });
+      sheetRow(parent, { icon: ICONS.gallery, label: 'Choose from gallery', onTap: () => el.filePhoto.click() });
+    });
+  }
+
+  function onPhotoPick(input) {
+    const files = input.files ? [...input.files] : [];
+    input.value = '';                                  // so picking the same file twice works
+    if (files.length) addPhotos(files);
+  }
+
+  /* ---------- a photo already in a note ---------- */
+
+  function photoActions(im) {
+    const id = im.getAttribute('data-img');
+    openSheet(parent => {
+      sheetTitle(parent, 'Photo');
+      sheetRow(parent, { icon: ICONS.expand, label: 'View full size', onTap: () => openLightbox(id) });
+      sheetRow(parent, { icon: ICONS.save, label: 'Save to device', onTap: () => savePhoto(id) });
+      sheetRow(parent, { icon: ICONS.trash, label: 'Remove photo', danger: true, onTap: () => {
+        const forNote = state.editing;
+        const home = im.parentNode, after = im.nextSibling;
+        im.remove();
+        dirty = true; syncPlaceholder(); saveNow(); render();
+        /* The bytes are not collected until the next launch, so Undo always has
+           something to put back — even once the note has been closed, when the
+           photo goes back on the end rather than exactly where it was. */
+        toast('Photo removed', 'Undo', () => {
+          if (state.editing === forNote && home) {
+            home.insertBefore(im, after);
+            dirty = true; syncPlaceholder(); saveNow();
+          } else {
+            const note = Store.get(forNote);
+            if (!note) return;
+            Store.update(forNote, { html: sanitizeHTML(note.html + im.outerHTML + '<p><br></p>') });
+          }
+          render();
+        });
+      } });
+    });
+  }
+
+  function openLightbox(id) {
+    loadPic(id).then(url => {
+      if (!url) return toast('That photo is missing');
+      el.lbImg.src = url;
+      el.lightbox.hidden = false;
+      requestAnimationFrame(() => el.lightbox.classList.add('show'));
+      pushOverlay('lightbox', hideLightbox);
+    });
+  }
+  function hideLightbox() {
+    el.lightbox.classList.remove('show');
+    setTimeout(() => { el.lightbox.hidden = true; el.lbImg.removeAttribute('src'); }, 220);
+  }
+  el.lightbox.addEventListener('click', () => { if (isOpen('lightbox')) popOverlay(); });
+
+  async function savePhoto(id) {
+    const rec = await Store.getImage(id);
+    if (!rec || !rec.blob) return toast('That photo is missing');
+    const type = rec.type || rec.blob.type || '';
+    const ext = /png/i.test(type) ? 'png' : /webp/i.test(type) ? 'webp'
+              : /gif/i.test(type) ? 'gif' : 'jpg';
+    const url = URL.createObjectURL(rec.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'inkwell-photo-' + id + '.' + ext;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Saved to your downloads');
   }
 
   /* ============================================================
@@ -310,14 +604,23 @@
 
     const title = (note.title || '').trim();
     const snippet = snippetOf(note);
+    const pics = note.pics || [];
     let html = '';
 
     if (note.pinned) {
       html += '<svg class="cpin" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 3.5h5l-.7 5.2 3.2 3.3h-4.6L12 20.5l-.4-8.5H7l3.2-3.3z"/></svg>';
     }
+    if (pics.length) {
+      const shown = pics.slice(0, 3);
+      html += '<div class="thumbs" data-n="' + shown.length + '">' +
+        shown.map(id => '<img class="cthumb" data-img="' + escapeHTML(id) + '" alt="" loading="lazy" decoding="async">').join('') +
+        (pics.length > shown.length ? '<span class="morepics">+' + (pics.length - shown.length) + '</span>' : '') +
+        '</div>';
+      card.classList.add('haspics');
+    }
     if (title) html += '<h3>' + highlight(title, q) + '</h3>';
     if (snippet) html += '<p class="snippet">' + highlight(snippet, q) + '</p>';
-    if (!title && !snippet) html += '<p class="snippet muted">Empty note</p>';
+    if (!title && !snippet && !pics.length) html += '<p class="snippet muted">Empty note</p>';
 
     html += '<div class="cardfoot"><time datetime="' + new Date(note.updated).toISOString() + '">' +
             escapeHTML(state.view === 'trash' ? 'Trashed ' + relTime(note.trashed) : relTime(note.updated)) +
@@ -327,6 +630,7 @@
     html += '</div>';
 
     card.innerHTML = html;
+    if (pics.length) showPics(card);
     card.addEventListener('click', () => {
       if (state.view === 'trash') return trashedNoteSheet(note.id);
       openEditor(note.id);
@@ -410,9 +714,11 @@
   function renderDrawer() {
     const live = Store.live();
     const tags = Store.tags();
+    const pics = Store.photoCount();
     el.statLine.textContent =
       live.length + (live.length === 1 ? ' note' : ' notes') +
-      (tags.length ? ' · ' + tags.length + (tags.length === 1 ? ' tag' : ' tags') : '');
+      (tags.length ? ' · ' + tags.length + (tags.length === 1 ? ' tag' : ' tags') : '') +
+      (pics ? ' · ' + pics + (pics === 1 ? ' photo' : ' photos') : '');
 
     el.drawerNav.textContent = '';
     NAV.forEach(item => {
@@ -519,7 +825,12 @@
     restore: '<path d="M4 12a8 8 0 1114 5.3M4 12V7M4 12h5"/>',
     info: '<circle cx="12" cy="12" r="8.2"/><path d="M12 11v5.5"/><circle cx="12" cy="8.2" r="1" fill="currentColor" stroke="none"/>',
     pin: '<path d="M9.5 3.5h5l-.7 5.2 3.2 3.3h-4.6L12 20.5l-.4-8.5H7l3.2-3.3z"/>',
-    palette: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="8.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.1" cy="11.5" r="1.15" fill="currentColor" stroke="none"/><circle cx="8.9" cy="11.7" r="1.15" fill="currentColor" stroke="none"/>'
+    palette: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="8.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.1" cy="11.5" r="1.15" fill="currentColor" stroke="none"/><circle cx="8.9" cy="11.7" r="1.15" fill="currentColor" stroke="none"/>',
+    camera: '<path d="M4 8.6h2.8l1.4-2.4h7.6l1.4 2.4H20a1.5 1.5 0 011.5 1.5v7.4A1.5 1.5 0 0120 19.5H4a1.5 1.5 0 01-1.5-1.5v-7.4A1.5 1.5 0 014 8.6z"/><circle cx="12" cy="13.8" r="3.3"/>',
+    gallery: '<rect x="3.2" y="5.2" width="17.6" height="13.6" rx="2.6"/><circle cx="8.7" cy="10.1" r="1.7"/><path d="M3.6 16.6l4.4-4.1 3.2 3 3.3-3.5 6.3 6"/>',
+    photo: '<rect x="3.2" y="5.2" width="17.6" height="13.6" rx="2.6"/><circle cx="8.7" cy="10.1" r="1.7"/><path d="M3.6 16.6l4.4-4.1 3.2 3 3.3-3.5 6.3 6"/>',
+    expand: '<path d="M9.5 4.5h-5v5M14.5 19.5h5v-5M19.5 9.5v-5h-5M4.5 14.5v5h5"/>',
+    save: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/>'
   };
 
   /* ============================================================
@@ -527,17 +838,22 @@
      ============================================================ */
 
   let dirty = false;
+  let composing = false;    // true while an IME is mid-word
 
+  /* Sanitising the body builds a whole throwaway document, so this bails out
+     the moment there is nothing to write — blur, backgrounding and closing the
+     editor all land here and used to pay that cost whether or not anything
+     had changed. */
   const saveNow = () => {
-    if (!state.editing) return;
+    if (!dirty || !state.editing) return;
     const note = Store.get(state.editing);
-    if (!note) return;
+    if (!note) { dirty = false; return; }
     const html = sanitizeHTML(el.edBody.innerHTML);
     const text = htmlToText(html);
     const title = el.edTitle.value.replace(/\s*\n+\s*/g, ' ').trim();   // pasted titles stay one line
+    dirty = false;
     if (note.title === title && note.html === html) return;
     Store.update(state.editing, { title, html, text });
-    dirty = false;
     updateEdMeta();
   };
   const saveSoon = debounce(saveNow, 600);
@@ -599,6 +915,7 @@
 
     el.edTitle.value = note.title || '';
     el.edBody.innerHTML = sanitizeHTML(note.html);
+    showPics(el.edBody);              // the markup keeps ids; attach the pixels
     el.editor.dataset.color = note.color && note.color !== 'none' ? note.color : '';
     el.btnPin.classList.toggle('on', !!note.pinned);
     el.btnPin.setAttribute('aria-label', note.pinned ? 'Unpin note' : 'Pin note');
@@ -621,6 +938,8 @@
   }
 
   function hideEditor() {
+    composing = false;
+    savedRange = null;
     saveSoon.flush();
     const note = Store.get(state.editing);
 
@@ -641,20 +960,61 @@
 
   el.btnBack.addEventListener('click', closeEditor);
 
-  el.edTitle.addEventListener('input', () => { dirty = true; growTitle(); saveSoon(); });
+  el.edTitle.addEventListener('input', () => {
+    dirty = true;
+    growTitle();
+    if (!composing) saveSoon();
+  });
   el.edTitle.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); el.edBody.focus(); }
+    if (e.key === 'Enter' && !composing) { e.preventDefault(); el.edBody.focus(); }
   });
   el.edBody.addEventListener('input', () => {
-    dirty = true; syncPlaceholder(); saveSoon(); refreshToolbarState();
+    dirty = true;
+    /* mid-composition the IME owns the DOM — touching it here is what used to
+       make Gboard stutter and die when the language was switched */
+    if (composing) return;
+    syncPlaceholder();
+    saveSoon();
+    queueToolbarState();
   });
-  el.edBody.addEventListener('blur', () => { if (dirty) saveNow(); });
+  el.edBody.addEventListener('blur', () => { if (dirty && !composing) saveNow(); });
 
-  /* paste as plain text so foreign styles never leak in */
+  /* An IME (Japanese, Chinese, Korean, or any swipe/suggestion keyboard) feeds
+     us a stream of provisional text. Hold still until it has finished. */
+  const startComposing = () => { composing = true; };
+  const stopComposing = () => {
+    if (!composing) return;
+    composing = false;
+    dirty = true;
+    syncPlaceholder();
+    saveSoon();
+    queueToolbarState();
+  };
+  [el.edBody, el.edTitle].forEach(node => {
+    node.addEventListener('compositionstart', startComposing);
+    node.addEventListener('compositionend', stopComposing);
+    node.addEventListener('compositioncancel', stopComposing);
+    /* switching keyboards can tear the IME down without a compositionend */
+    node.addEventListener('blur', stopComposing);
+  });
+
+  /* paste photos as photos, everything else as plain text so foreign styles
+     never leak in */
   el.edBody.addEventListener('paste', e => {
+    const dt = e.clipboardData || window.clipboardData;
     e.preventDefault();
-    const text = (e.clipboardData || window.clipboardData).getData('text/plain');
-    document.execCommand('insertText', false, text);
+    if (!dt) return;
+    const pics = dt.files ? [...dt.files].filter(f => /^image\//i.test(f.type || '')) : [];
+    if (pics.length) { rememberCaret(); addPhotos(pics); return; }
+    document.execCommand('insertText', false, dt.getData('text/plain'));
+  });
+
+  /* tapping a photo opens what you can do with it */
+  el.edBody.addEventListener('click', e => {
+    const im = e.target && e.target.tagName === 'IMG' ? e.target : null;
+    if (!im || !im.hasAttribute('data-img')) return;
+    e.preventDefault();
+    photoActions(im);
   });
 
   /* checkbox taps in checklists */
@@ -717,6 +1077,7 @@
       case 'heading':  return toggleBlock('H2');
       case 'quote':    return toggleBlock('BLOCKQUOTE');
       case 'divider':  return exec('insertHTML', '<hr><p><br></p>');
+      case 'photo':    return photoSheet();
       case 'code': {
         const sel = window.getSelection();
         const node = currentBlock();
@@ -768,7 +1129,20 @@
       if (cmd === 'heading') on = !!currentBlock('h2');
       if (cmd === 'quote') on = !!currentBlock('blockquote');
       if (cmd === 'code') on = !!currentBlock('code');
+      if (cmd === 'photo') on = false;
       b.classList.toggle('on', !!on);
+    });
+  }
+
+  /* queryCommandState and the ancestor walks behind it are not free, and
+     selectionchange fires on every keystroke — so at most one pass a frame,
+     and none at all while an IME is composing. */
+  let toolbarFrame = 0;
+  function queueToolbarState() {
+    if (toolbarFrame || composing) return;
+    toolbarFrame = requestAnimationFrame(() => {
+      toolbarFrame = 0;
+      if (!composing) refreshToolbarState();
     });
   }
 
@@ -778,7 +1152,7 @@
   });
 
   document.addEventListener('selectionchange', () => {
-    if (el.editor.classList.contains('open')) refreshToolbarState();
+    if (el.editor.classList.contains('open')) queueToolbarState();
   });
 
   /* show the toolbar only while the body has focus */
@@ -885,10 +1259,15 @@
     });
   }
 
+  el.filePhoto.addEventListener('change', () => onPhotoPick(el.filePhoto));
+  el.fileCamera.addEventListener('change', () => onPhotoPick(el.fileCamera));
+
   el.btnMore.addEventListener('click', () => {
     const note = Store.get(state.editing);
     if (!note) return;
+    rememberCaret();        // so "Add a photo" from here still knows where you were
     openSheet(parent => {
+      sheetRow(parent, { icon: ICONS.photo, label: 'Add a photo', onTap: photoSheet });
       sheetRow(parent, { icon: ICONS.tag, label: 'Tags', hint: note.tags.length ? String(note.tags.length) : '', onTap: tagSheet });
       sheetRow(parent, { icon: ICONS.copy, label: 'Copy text', onTap: () => copyNote(note.id) });
       if (navigator.share) sheetRow(parent, { icon: ICONS.share, label: 'Share', onTap: () => shareNote(note.id) });
@@ -956,6 +1335,7 @@
         ['Last edited', fmtLong.format(new Date(note.updated))],
         ['Words', String(words)],
         ['Characters', String(note.text.length)],
+        ['Photos', String((note.pics || []).length)],
         ['Tags', note.tags.length ? note.tags.map(t => '#' + t).join(' ') : '—']
       ];
       rows.forEach(([k, v]) => {
@@ -981,7 +1361,7 @@
           body: 'This note cannot be recovered afterwards.',
           ok: 'Delete'
         });
-        if (ok) { Store.destroy(id); render(); toast('Deleted'); }
+        if (ok) { Store.destroy(id); Store.gcImages().catch(() => {}); render(); toast('Deleted'); }
       } });
     });
   }
@@ -1032,7 +1412,7 @@
       body: n + (n === 1 ? ' note' : ' notes') + ' will be deleted for good.',
       ok: 'Empty trash'
     });
-    if (ok) { Store.emptyTrash(); render(); toast('Trash emptied'); }
+    if (ok) { Store.emptyTrash(); Store.gcImages().catch(() => {}); render(); toast('Trash emptied'); }
   });
 
   [...el.themeSeg.children].forEach(b => b.addEventListener('click', () => {
@@ -1058,18 +1438,31 @@
      export · import
      ============================================================ */
 
-  el.btnExport.addEventListener('click', () => {
-    const stamp = new Date().toISOString().slice(0, 10);
-    const blob = new Blob([Store.exportJSON()], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'inkwell-backup-' + stamp + '.json';
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    toast('Backup saved to your downloads');
+  let exporting = false;
+  el.btnExport.addEventListener('click', async () => {
+    if (exporting) return;
+    exporting = true;
+    const pics = Store.photoCount();
+    if (pics) toast('Packing ' + pics + (pics === 1 ? ' photo…' : ' photos…'));
+    try {
+      /* photos go in as data URLs, so one file really is the whole notebook */
+      const json = await Store.exportBundle();
+      const stamp = new Date().toISOString().slice(0, 10);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'inkwell-backup-' + stamp + '.json';
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 8000);
+      const mb = blob.size / (1024 * 1024);
+      toast('Backup saved · ' + (mb >= 1 ? mb.toFixed(1) + ' MB' : Math.max(1, Math.round(blob.size / 1024)) + ' KB'));
+    } catch (_) {
+      toast('Could not write the backup');
+    }
+    exporting = false;
   });
 
   el.btnImport.addEventListener('click', () => el.fileImport.click());
@@ -1085,6 +1478,7 @@
       if (res.added) bits.push(res.added + ' added');
       if (res.updated) bits.push(res.updated + ' updated');
       if (res.skipped) bits.push(res.skipped + ' unchanged');
+      if (res.photos) bits.push(res.photos + (res.photos === 1 ? ' photo' : ' photos'));
       toast(bits.length ? 'Imported: ' + bits.join(', ') : 'Nothing new to import');
     } catch (err) {
       toast(err.message || 'Import failed');
@@ -1111,51 +1505,261 @@
 
   /* ============================================================
      on-screen keyboard: keep the editor above it
+
+     The editor's height is driven by the visual viewport, so every
+     one of these events relays out a full-screen contenteditable.
+     Opening the keyboard switcher or changing language fires them
+     in bursts of dozens — which is what made the app crawl and then
+     be killed. Three things stop that: one write per frame, no
+     write at all when nothing actually moved, and the expensive
+     paint effects switched off while the viewport is in motion.
      ============================================================ */
 
   const vv = window.visualViewport;
-  if (vv) {
-    const syncVV = () => {
-      el.root.style.setProperty('--vvh', vv.height + 'px');
-      el.root.style.setProperty('--vvt', vv.offsetTop + 'px');
-    };
-    vv.addEventListener('resize', syncVV);
-    vv.addEventListener('scroll', syncVV);
-    syncVV();
+  let vvFrame = 0, vvH = -1, vvT = -1, vvSettle = null;
+
+  function writeViewport() {
+    vvFrame = 0;
+    if (!vv) return;
+    const h = Math.round(vv.height), t = Math.round(vv.offsetTop);
+    if (h === vvH && t === vvT) return;
+    vvH = h; vvT = t;
+    el.root.style.setProperty('--vvh', h + 'px');
+    el.root.style.setProperty('--vvt', t + 'px');
   }
 
-  /* keep the caret in view while typing near the keyboard */
-  el.edBody.addEventListener('keyup', () => {
+  function viewportMoved() {
+    el.root.classList.add('vv-busy');
+    clearTimeout(vvSettle);
+    vvSettle = setTimeout(() => el.root.classList.remove('vv-busy'), 260);
+    if (!vvFrame) vvFrame = requestAnimationFrame(writeViewport);
+  }
+
+  if (vv) {
+    vv.addEventListener('resize', viewportMoved, { passive: true });
+    vv.addEventListener('scroll', viewportMoved, { passive: true });
+    writeViewport();
+  }
+
+  /* keep the caret in view while typing near the keyboard — measuring forces
+     layout, so once a frame at most, and never mid-composition */
+  let caretFrame = 0;
+  function keepCaretInView() {
+    caretFrame = 0;
+    if (composing || !el.editor.classList.contains('open')) return;
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    const range = sel.getRangeAt(0);
+    if (!el.edBody.contains(range.startContainer)) return;
+    const rect = range.getBoundingClientRect();
     if (!rect || !rect.height) return;
     const limit = el.toolbar.getBoundingClientRect().top - 12;
     if (rect.bottom > limit) el.edScroll.scrollTop += rect.bottom - limit;
+  }
+  el.edBody.addEventListener('keyup', () => {
+    if (composing || caretFrame) return;
+    caretFrame = requestAnimationFrame(keepCaretInView);
   });
 
   /* ============================================================
-     service worker
+     service worker & updating in place
+
+     An installed PWA keeps serving itself from its own cache, so a
+     new build can sit on the server unnoticed. "Update app" in the
+     side menu forces the issue: activate a waiting worker if there
+     is one, otherwise have the worker re-download the shell past
+     every HTTP cache, then reload. Either way nothing is reinstalled
+     and no notes are touched.
      ============================================================ */
+
+  let swReg = null;
+  let swVersion = '';
+  let updating = false;
+  let reloadingForUpdate = false;
+  let lastCheck = 0;
+
+  function showVersion() {
+    const sw = swVersion && swVersion !== APP_VERSION ? ' · files ' + swVersion : '';
+    el.verLine.textContent = 'Inkwell · version ' + APP_VERSION + sw;
+  }
+  function hint(text) { el.updateHint.textContent = text; }
+
+  /* Come back up on the new build.
+
+     location.reload() is not enough, and this is the whole reason updating an
+     installed PWA has a reputation for needing a reinstall: a *reload* lets the
+     browser reuse the stylesheet and the scripts it already holds in its HTTP
+     cache — GitHub Pages serves them with a ten-minute lifetime — without ever
+     asking the service worker. The worker would be sitting on the new files and
+     the old ones would still be running. A navigation to a URL the browser has
+     not seen is a new document load, and that does go through the worker, so
+     the new files are the ones that run. The marker is stripped off again as
+     the app starts, so nothing accumulates in the address bar. */
+  function relaunch() {
+    try { location.replace(location.pathname + '?u=' + Date.now()); }
+    catch (_) { location.reload(); }
+  }
+
+  /* Talk to the worker and wait for its answer, but never hang on it. */
+  function askWorker(sw, message, ms) {
+    return new Promise(resolve => {
+      if (!sw) return resolve(null);
+      let done = false;
+      const finish = value => { if (!done) { done = true; resolve(value); } };
+      const timer = setTimeout(() => finish(null), ms || 15000);
+      try {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = e => { clearTimeout(timer); finish(e.data); };
+        sw.postMessage(message, [channel.port2]);
+      } catch (_) { clearTimeout(timer); finish(null); }
+    });
+  }
+
+  function activateWorker(sw) {
+    return new Promise(resolve => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      if (sw.state === 'activated') return finish();
+      sw.addEventListener('statechange', () => { if (sw.state === 'activated') finish(); });
+      try { sw.postMessage({ type: 'skip-waiting' }); } catch (_) {}
+      setTimeout(finish, 5000);
+    });
+  }
+
+  function offerUpdate(sw) {
+    toast('A new version is ready', 'Update', async () => {
+      if (dirty) saveNow();
+      reloadingForUpdate = true;      // set first: claiming the page fires controllerchange
+      await activateWorker(sw);
+      relaunch();
+    });
+  }
+
+  async function updateNow() {
+    if (updating) return;
+    updating = true;
+    if (dirty) saveNow();                       // never trade text for a reload
+    hint('Checking…');
+
+    try {
+      if (!('serviceWorker' in navigator)) { reloadingForUpdate = true; relaunch(); return; }
+
+      const reg = swReg || await navigator.serviceWorker.getRegistration();
+      if (!reg) { reloadingForUpdate = true; relaunch(); return; }
+      swReg = reg;
+
+      await reg.update().catch(() => {});
+      lastCheck = Date.now();
+
+      const pending = reg.waiting || reg.installing;
+      if (pending) {
+        hint('Installing the new version…');
+        reloadingForUpdate = true;
+        await activateWorker(pending);
+        relaunch();
+        return;
+      }
+
+      /* The worker itself is unchanged — but the files it hands out may not be,
+         so make it fetch them again with the HTTP cache bypassed. */
+      hint('Fetching the latest files…');
+      const worker = reg.active || navigator.serviceWorker.controller;
+
+      if (worker) {
+        const res = await askWorker(worker, { type: 'refresh' });
+        if (res && res.ok) {
+          hint('Restarting…');
+          reloadingForUpdate = true;
+          relaunch();
+          return;
+        }
+        /* It tried and came back empty-handed — offline, or a network that
+           answers but does not serve. The cache is deliberately left alone:
+           it is the only copy that lets the app open at all. */
+        const got = res ? res.fetched : 0;
+        hint(navigator.onLine === false ? 'Offline — nothing to fetch yet'
+           : got ? 'Only part of it arrived — try again'
+           : 'Could not reach the network');
+        toast(navigator.onLine === false ? 'No connection — try again when you are online'
+                                         : 'Update could not finish');
+        updating = false;
+        return;
+      }
+
+      /* No worker to ask at all. Emptying the caches makes the reload go to
+         the network for everything — safe only while we are online. */
+      if (navigator.onLine === false || !window.caches) {
+        hint('Offline — nothing to fetch yet');
+        toast('No connection — try again when you are online');
+        updating = false;
+        return;
+      }
+      await caches.keys()
+        .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+        .catch(() => {});
+      hint('Restarting…');
+      reloadingForUpdate = true;
+      relaunch();
+    } catch (_) {
+      hint('Update failed — try again');
+      toast('Update failed');
+      updating = false;
+    }
+  }
+
+  el.btnUpdate.addEventListener('click', updateNow);
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').then(reg => {
+      navigator.serviceWorker.register('sw.js').then(async reg => {
+        swReg = reg;
+
+        /* a worker that finished installing while the app was closed */
+        if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+
         reg.addEventListener('updatefound', () => {
-          const sw = reg.installing;
+          const sw = reg.installing || reg.waiting;
           if (!sw) return;
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) return offerUpdate(sw);
           sw.addEventListener('statechange', () => {
-            if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-              toast('A new version is ready', 'Reload', () => {
-                sw.postMessage({ type: 'skip-waiting' });
-                setTimeout(() => location.reload(), 120);
-              });
-            }
+            if (sw.state === 'installed' && navigator.serviceWorker.controller && !updating) offerUpdate(sw);
           });
         });
-      }).catch(() => { /* offline support simply stays off */ });
+
+        const active = reg.active || navigator.serviceWorker.controller;
+        const info = await askWorker(active, { type: 'version' }, 4000);
+        if (info && info.version) { swVersion = info.version; showVersion(); }
+        hint(swVersion && swVersion !== APP_VERSION
+          ? 'Cached files are out of date — tap to fix'
+          : 'Up to date · tap to check again');
+
+        lastCheck = Date.now();
+      }).catch(() => {
+        hint('Offline support is off here');
+      });
     });
+
+    /* If something else activated a new worker, come back on the new build —
+       but a first install claiming the page is not an update, it is just the
+       worker starting for the first time. */
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloadingForUpdate) return;
+      reloadingForUpdate = true;
+      if (dirty) saveNow();
+      relaunch();
+    });
+  } else {
+    hint('This browser cannot update in place');
   }
+
+  /* a quiet check each time the app comes back to the foreground */
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || !swReg || updating) return;
+    if (Date.now() - lastCheck < 1800000) return;      // half an hour is plenty
+    lastCheck = Date.now();
+    swReg.update().catch(() => {});
+  });
 
   /* ============================================================
      share target & shortcuts  (?title=…&text=…  /  ?new=1)
@@ -1163,6 +1767,8 @@
 
   function handleLaunchParams() {
     const p = new URLSearchParams(location.search);
+    /* the cache-busting marker relaunch() added — tidy it away again */
+    if (p.get('u')) history.replaceState(null, '', location.pathname);
     const shared = (p.get('text') || '') + (p.get('url') ? '\n' + p.get('url') : '');
     const title = p.get('title') || '';
 
@@ -1202,9 +1808,13 @@
     if (e.key === 'n' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); el.fab.click(); }
   });
 
-  /* save before the page goes away */
-  window.addEventListener('beforeunload', () => { if (dirty) saveNow(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden && dirty) saveNow(); });
+  /* Save before the page goes away. Android can discard a backgrounded
+     WebView without ever firing beforeunload, so pagehide and
+     visibilitychange are the ones that actually matter on a phone. */
+  const saveIfDirty = () => { if (dirty) saveNow(); };
+  window.addEventListener('beforeunload', saveIfDirty);
+  window.addEventListener('pagehide', saveIfDirty);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveIfDirty(); });
 
   /* ============================================================
      boot
@@ -1217,12 +1827,18 @@
     state.sort = s.sort || 'updated';
     applyTheme(); applyLayout(); applySort();
 
+    showVersion();
+
     await Store.init();
     Store.pruneTrash(TRASH_DAYS);
     Store.pruneEmpty();   // blank notes left behind if the app was killed mid-edit
 
     render();
     handleLaunchParams();
+
+    /* photos no note points at any more — removed last session, or left over
+       from a note that was deleted for good */
+    Store.gcImages().catch(() => {});
 
     if (Store.fallback) {
       setTimeout(() => toast('Storage is limited here — export backups often'), 1200);
