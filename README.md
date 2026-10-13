@@ -132,8 +132,11 @@ You never need to uninstall and reinstall. If the button says *Could not reach t
 network*, nothing has been changed and the app carries on as it was; try again when
 you have a connection.
 
-The app also checks quietly when you open it, and offers a **Update** button in a
-toast if it finds something new.
+The app also checks when you open it. If it finds a new version it asks, with a
+**Update available** dialog offering *Update now* or *Later* — it never swaps
+itself out underneath you, and it will not interrupt a note you are in the middle
+of writing: the question waits until you close the editor. Choose *Later* and the
+side menu says one is waiting, ready whenever you are.
 
 > Why a button at all: an installed PWA serves itself out of its own cache, and the
 > browser will happily answer the app's own script and stylesheet requests from a
@@ -146,12 +149,19 @@ toast if it finds something new.
 
 ## Changing it
 
+- **Anything that floats over the app** — the bottom sheets, the dialog, the photo
+  viewer and the toast are positioned against the *visual* viewport
+  (`--vvh`, `--vvt`, `--kb`), not the window. An open keyboard shrinks the visual
+  viewport but leaves the window its full height, so anything pinned to the bottom
+  of the window opens behind the keyboard. Keep new overlays on those variables.
 - **Colours and sizes** — the tokens at the top of [`css/style.css`](css/style.css).
   `--accent` is the green; change that one line to recolour the whole app.
 - **App name** — the `<title>` in `index.html`, the `.brand` text, and `name` /
   `short_name` in `manifest.webmanifest`.
 - **Icons** — replace the PNGs in `icons/`. They are 192, 512, a 512 maskable
   (keep the artwork inside the middle 80%, Android crops the rest), and a 180 for iOS.
+- The service worker caches a new build and then **waits** rather than taking
+  over. The page is what asks the question and sends `skip-waiting` on a yes.
 - **After any change**, bump the version in all three files so they agree:
   `VERSION` in [`sw.js`](sw.js), `APP_VERSION` in [`js/app.js`](js/app.js) and
   `STORE_VERSION` in [`js/store.js`](js/store.js). The cache is named after

@@ -3,7 +3,7 @@
    Bump VERSION whenever the shell files change: the cache name
    is built from it, so every client picks the new files up.
    ============================================================ */
-const VERSION = '1.1.1';
+const VERSION = '1.1.2';
 const CACHE = 'inkwell-' + VERSION;
 
 /* Relative URLs so the app works from any GitHub Pages sub-path. */
@@ -38,12 +38,12 @@ function prime(cache) {
   )).then(() => fetched);
 }
 
+/* Cache the new build, then wait. Taking over here instead would swap the app
+   out from under whoever is using it, with no warning and no say in it — the
+   page asks first and sends 'skip-waiting' when the answer is yes. A first
+   install has nothing to replace, so it activates straight away regardless. */
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then(prime)
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE).then(prime));
 });
 
 self.addEventListener('activate', event => {

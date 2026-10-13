@@ -40,7 +40,7 @@
 
   const COLORS = ['none', 'red', 'amber', 'green', 'teal', 'blue', 'violet', 'pink', 'sand'];
   const TRASH_DAYS = 30;
-  const APP_VERSION = '1.1.1';
+  const APP_VERSION = '1.1.2';
 
   /* Announce which build is actually running, but only if store.js came from
      the same one. index.html compares this with the version the service worker
@@ -489,6 +489,7 @@
       el.dlgTitle.textContent = opts.title;
       el.dlgBody.textContent = opts.body || '';
       el.dlgOk.textContent = opts.ok || 'Delete';
+      el.dlgCancel.textContent = opts.cancel || 'Cancel';
       el.dlgOk.classList.toggle('danger', opts.danger !== false);
       el.dialog.hidden = false;
       requestAnimationFrame(() => el.dialog.classList.add('show'));
@@ -960,6 +961,13 @@
     if (note && Store.isBlank(note)) Store.destroy(note.id);
     state.editing = null;
     render();
+
+    /* an update that turned up while the note was open */
+    if (updateWaiting) {
+      const ask = updateWaiting;
+      updateWaiting = null;
+      setTimeout(ask, 450);
+    }
   }
 
   function closeEditor() { if (isOpen('editor')) popOverlay(); }
@@ -1532,6 +1540,10 @@
     vvH = h; vvT = t;
     el.root.style.setProperty('--vvh', h + 'px');
     el.root.style.setProperty('--vvt', t + 'px');
+    /* How much of the window the keyboard is covering. The window keeps its
+       full height while the keyboard is up, so anything pinned to the bottom
+       of it needs to be lifted by this much to stay in sight. */
+    el.root.style.setProperty('--kb', Math.max(0, Math.round(window.innerHeight - h - t)) + 'px');
   }
 
   function viewportMoved() {
@@ -1632,13 +1644,34 @@
     });
   }
 
+  /* Asked about once per launch, and never over the top of a note being
+     written — a modal that steals the keyboard mid-sentence is worse than
+     waiting until the editor is closed. */
+  let updateAsked = false;
+  let updateWaiting = null;
+
   function offerUpdate(sw) {
-    toast('A new version is ready', 'Update', async () => {
+    if (updateAsked || updating) return;
+    updateAsked = true;
+    const ask = async () => {
+      const go = await confirmDialog({
+        title: 'Update available',
+        body: 'A newer version of Inkwell is ready. It takes a moment, and your notes and photos are not touched.',
+        ok: 'Update now',
+        cancel: 'Later',
+        danger: false
+      });
+      if (!go) {
+        hint('An update is waiting · tap to install');
+        return;
+      }
       if (dirty) saveNow();
       reloadingForUpdate = true;      // set first: claiming the page fires controllerchange
       await activateWorker(sw);
       relaunch();
-    });
+    };
+    if (el.editor.classList.contains('open')) updateWaiting = ask;
+    else setTimeout(ask, 600);        // let the app finish settling in first
   }
 
   async function updateNow() {

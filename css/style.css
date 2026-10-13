@@ -568,7 +568,15 @@ html.is-dark .ed-body ul.todo li::after, html.is-dark .card ul.todo li::after {
         background: color-mix(in srgb, var(--text) 14%, transparent); }
 
 /* ---------- bottom sheet ---------- */
-.sheetlayer { position: fixed; inset: 0; z-index: 60; }
+/* Anchored to the visual viewport, not the window. An open keyboard shrinks
+   the visual viewport but leaves the window the same height, so a fixed
+   element pinned to the bottom of the window sits *behind* the keyboard —
+   which is where every one of these sheets used to open from. The editor
+   already rides on these two variables; the overlays now do too. */
+.sheetlayer {
+  position: fixed; left: 0; right: 0; z-index: 60;
+  top: var(--vvt, 0px); height: var(--vvh, 100%);
+}
 .sheetlayer-scrim {
   position: absolute; inset: 0; background: rgba(16,14,10,.42);
   opacity: 0; transition: opacity .22s ease;
@@ -576,7 +584,7 @@ html.is-dark .ed-body ul.todo li::after, html.is-dark .card ul.todo li::after {
 .sheetlayer.show .sheetlayer-scrim { opacity: 1; }
 .bottomsheet {
   position: absolute; left: 0; right: 0; bottom: 0;
-  max-height: 80vh; overflow-y: auto; overscroll-behavior: contain;
+  max-height: 80%; overflow-y: auto; overscroll-behavior: contain;
   background: var(--surface);
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   box-shadow: var(--shadow-3);
@@ -641,7 +649,9 @@ html.is-dark .tagedit .field button { color: #04110d; }
 .tagedit .known { display: flex; flex-wrap: wrap; gap: 7px; }
 
 /* ---------- dialog ---------- */
-.dialog { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 24px;
+.dialog { position: fixed; left: 0; right: 0; z-index: 70;
+          top: var(--vvt, 0px); height: var(--vvh, 100%);
+          display: grid; place-items: center; padding: 24px;
           background: rgba(16,14,10,.45); opacity: 0; transition: opacity .2s ease; }
 .dialog.show { opacity: 1; }
 .dialog-card {
@@ -656,7 +666,8 @@ html.is-dark .tagedit .field button { color: #04110d; }
 
 /* ---------- toast ---------- */
 .toast {
-  position: fixed; z-index: 80; left: 50%; bottom: calc(28px + var(--safe-b));
+  position: fixed; z-index: 80; left: 50%;
+  bottom: calc(28px + var(--safe-b) + var(--kb, 0px));
   transform: translate(-50%, 24px); opacity: 0; pointer-events: none;
   max-width: calc(100vw - 32px);
   display: flex; align-items: center; gap: 14px;
@@ -674,7 +685,8 @@ html.is-dark .toast button { color: var(--accent-ink); }
 
 /* ---------- photo viewer ---------- */
 .lightbox {
-  position: fixed; inset: 0; z-index: 75;
+  position: fixed; left: 0; right: 0; z-index: 75;
+  top: var(--vvt, 0px); height: var(--vvh, 100%);
   display: grid; place-items: center; padding: 16px;
   background: rgba(8,7,5,.93);
   opacity: 0; transition: opacity .22s ease;

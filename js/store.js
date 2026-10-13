@@ -10,7 +10,7 @@
 
   /* Bumped with the app. index.html checks that the scripts which actually
      loaded belong together and match the files the worker is serving. */
-  const STORE_VERSION = '1.1.1';
+  const STORE_VERSION = '1.1.2';
 
   const DB_NAME = 'inkwell';
   const DB_VERSION = 2;
